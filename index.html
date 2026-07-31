@@ -167,6 +167,7 @@ const W = 1080, H = 1350;
 const TEXT_LEFT = 155;                 // margem esquerda (texto alinhado à esquerda)
 const TEXT_WIDTH = 700;                // largura de quebra — bloco compacto
 const REGION_TOP = 170, REGION_BOT_SIG = 1110, REGION_BOT_PHOTO = 1200;
+const FOTO_TEXT_TOP = 420;               // modo foto: topo FIXO do texto (como a referência)
 const BASE = 56, MIN = 30, LH_RATIO = 1.42;
 // Assinatura no canto inferior direito.
 const SIG_W = 150, SIG_RIGHT = 95, SIG_BOTTOM = 60;
@@ -290,6 +291,9 @@ function render(canvas, text){
   const regTop = REGION_TOP;
   const regBot = foto ? REGION_BOT_PHOTO : REGION_BOT_SIG;
   const regionH = regBot - regTop;
+  // No modo foto o texto é ANCORADO no topo (mesma altura da referência);
+  // no modo paletas ele fica centralizado na vertical.
+  const availH = foto ? (regBot - FOTO_TEXT_TOP) : regionH;
 
   // Auto-ajuste: reduz a fonte até o texto caber na altura disponível.
   let size = BASE, lh = Math.round(BASE*LH_RATIO), lines = [];
@@ -297,11 +301,11 @@ function render(canvas, text){
     ctx.font = `${weight} ${s}px ${BODY}`;
     lines = text.trim() ? wrapText(ctx, text, wrapW) : [];
     size = s; lh = Math.round(s*LH_RATIO);
-    if(lines.length*lh <= regionH) break;
+    if(lines.length*lh <= availH) break;
   }
 
   const textH = lines.length*lh;
-  const startY = Math.round(regTop + (regionH - textH)/2);
+  const startY = foto ? FOTO_TEXT_TOP : Math.round(regTop + (regionH - textH)/2);
   ctx.font = `${weight} ${size}px ${BODY}`;
   ctx.fillStyle = fg;
   ctx.textAlign = foto ? "center" : "left"; ctx.textBaseline = "alphabetic";
