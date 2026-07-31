@@ -107,11 +107,15 @@
         <div id="ctlFoto" style="display:none">
           <label class="blk"><span class="eyebrow muted">Foto de fundo</span>
             <input type="file" id="photo" accept="image/*" /></label>
-          <div class="custom" style="margin-top:14px">
-            <input type="color" id="fontcolor" value="#a8553f" aria-label="cor da fonte" />
-            <span class="note muted">cor da fonte do texto (e do @)</span>
+          <div style="margin-top:16px">
+            <span class="eyebrow muted" style="display:block;margin-bottom:10px">Cor da fonte</span>
+            <div class="swatches" id="fontsw"></div>
+            <div class="custom" style="margin-top:12px">
+              <input type="color" id="fontcolor" value="#a8553f" aria-label="cor personalizada da fonte" />
+              <span class="note muted">ou uma cor personalizada</span>
+            </div>
           </div>
-          <p class="note muted" style="margin-top:12px">Topo fixo com <strong>@dra.isabelciribelli</strong>. Sem assinatura neste modo.</p>
+          <p class="note muted" style="margin-top:12px">Cor única para o texto e o @. Uma <strong>sombra automática</strong> atrás do texto mantém tudo legível em qualquer foto. Topo fixo com <strong>@dra.isabelciribelli</strong>. Sem assinatura neste modo.</p>
         </div>
       </section>
     </div>
@@ -192,6 +196,21 @@ function wrapText(ctx, text, maxWidth){
   return out;
 }
 
+function luminance(hex){
+  const h = hex.replace("#","");
+  const r = parseInt(h.slice(0,2),16)/255, g = parseInt(h.slice(2,4),16)/255, b = parseInt(h.slice(4,6),16)/255;
+  const f = c => c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+  return 0.2126*f(r) + 0.7152*f(g) + 0.0722*f(b);
+}
+// Sombra adaptativa: escura se a fonte for clara, clara se a fonte for escura.
+// Garante legibilidade do texto sobre qualquer foto de fundo.
+function setTextShadow(ctx, fg){
+  const light = luminance(fg) > 0.5;
+  ctx.shadowColor = light ? "rgba(0,0,0,0.62)" : "rgba(255,255,255,0.72)";
+  ctx.shadowBlur = 24; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+}
+function clearShadow(ctx){ ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; }
+
 function drawSig(ctx, color){
   if(!SIG || !SIG.width) return;
   const w = SIG_W, h = Math.round(SIG.height * (SIG_W / SIG.width));
@@ -208,7 +227,10 @@ function drawHandle(ctx, color){
   ctx.font = `600 ${HANDLE_SIZE}px ${BODY}`;
   ctx.fillStyle = color;
   ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  setTextShadow(ctx, color);
   ctx.fillText(HANDLE, W/2, HANDLE_TOP);
+  ctx.fillText(HANDLE, W/2, HANDLE_TOP);
+  clearShadow(ctx);
   ctx.textAlign = "left";
 }
 
@@ -245,7 +267,12 @@ function render(canvas, text){
   ctx.font = `400 ${size}px ${BODY}`;
   ctx.fillStyle = fg;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  lines.forEach((ln,i)=>{ if(ln) ctx.fillText(ln, TEXT_LEFT, startY + i*lh + size*0.75); });
+  const passes = mode === "foto" ? 2 : 1;   // no modo foto, 2 passadas reforçam a sombra
+  if(mode === "foto") setTextShadow(ctx, fg);
+  for(let pass=0; pass<passes; pass++){
+    lines.forEach((ln,i)=>{ if(ln) ctx.fillText(ln, TEXT_LEFT, startY + i*lh + size*0.75); });
+  }
+  clearShadow(ctx);
 
   if(mode === "paletas") drawSig(ctx, fg);
   else drawHandle(ctx, fg);
@@ -294,7 +321,31 @@ $("photo").addEventListener("change", (e)=>{
   };
   reader.readAsDataURL(file);
 });
-$("fontcolor").addEventListener("input", (e)=>{ fontColor = e.target.value; draw(); });
+
+// Atalhos de cor da fonte — os mesmos tons das paletas.
+const FONT_PRESETS = [
+  { name:"Terracota", c:"#a8553f" },
+  { name:"Branco",    c:"#ffffff" },
+  { name:"Verde",     c:"#696b53" },
+];
+const fontSwWrap = $("fontsw");
+FONT_PRESETS.forEach((p,i)=>{
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "sw" + (i===0 ? " on" : "");
+  b.style.background = p.c; b.title = p.name; b.setAttribute("aria-label", p.name);
+  b.addEventListener("click", ()=>{
+    fontColor = p.c; $("fontcolor").value = p.c;
+    [...fontSwWrap.children].forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); draw();
+  });
+  fontSwWrap.appendChild(b);
+});
+$("fontcolor").addEventListener("input", (e)=>{
+  fontColor = e.target.value;
+  [...fontSwWrap.children].forEach(x=>x.classList.remove("on"));
+  draw();
+});
 
 $("text").addEventListener("input", draw);
 
