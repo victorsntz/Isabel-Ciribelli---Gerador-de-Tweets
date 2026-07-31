@@ -27,7 +27,9 @@
   .grid { display:grid; gap:40px; margin-top:48px; grid-template-columns:minmax(0,1fr) minmax(0,400px); }
   @media (max-width:880px){ .grid{ grid-template-columns:1fr; } .preview{ order:2; } .controls{ order:1; } }
   .card { border:1px solid var(--line); background:#faf9f6; padding:20px; }
-  canvas { display:block; margin:0 auto; width:100%; max-width:400px; height:auto; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+  canvas { display:block; margin:0 auto; width:100%; max-width:400px; height:auto; box-shadow:0 1px 3px rgba(0,0,0,.1); touch-action:none; }
+  canvas.grab { cursor:grab; }
+  canvas.grab:active { cursor:grabbing; }
   .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
   button { font-family:var(--serif); font-size:.95rem; cursor:pointer; padding:10px 20px; border:1px solid var(--line); background:transparent; color:var(--muted); transition:.15s; }
   button:hover { border-color:var(--fg); color:var(--fg); }
@@ -107,6 +109,11 @@
         <div id="ctlFoto" style="display:none">
           <label class="blk"><span class="eyebrow muted">Foto de fundo</span>
             <input type="file" id="photo" accept="image/*" /></label>
+          <div id="photoAdjust" style="display:none;margin-top:16px">
+            <span class="eyebrow muted" style="display:block;margin-bottom:8px">Zoom da foto</span>
+            <input type="range" id="zoom" min="100" max="300" value="100" style="width:100%" />
+            <p class="note muted" style="margin-top:8px">Arraste a foto na prévia para reposicionar (subir, descer, lados).</p>
+          </div>
           <div style="margin-top:16px">
             <span class="eyebrow muted" style="display:block;margin-bottom:10px">Cor da fonte</span>
             <div class="swatches" id="fontsw"></div>
@@ -173,6 +180,8 @@ let mode = "paletas";
 let current = { bg: PRESETS[0].bg, fg: PRESETS[0].fg };
 let fontColor = "#a8553f";
 let shadowStrength = 60;                 // 0–100, ajustável no modo foto
+let photoZoom = 1;                        // 1–3, ajustável no modo foto
+let photoX = 0, photoY = 0;              // deslocamento da foto (px do canvas)
 let PHOTO = null;
 let SIG = null;
 
@@ -245,15 +254,27 @@ function drawHandle(ctx, color){
   ctx.textAlign = "left";
 }
 
+// Desenha a foto de fundo com zoom + deslocamento, travando para nunca
+// deixar borda vazia (a foto sempre cobre os 1080x1350).
+function drawPhotoBg(ctx){
+  const base = Math.max(W/PHOTO.width, H/PHOTO.height);
+  const scale = base * photoZoom;
+  const dw = PHOTO.width*scale, dh = PHOTO.height*scale;
+  // trava o deslocamento dentro dos limites da imagem
+  photoX = Math.min(0, Math.max(W - dw, photoX));
+  photoY = Math.min(0, Math.max(H - dh, photoY));
+  const x = (dw <= W) ? (W - dw)/2 : photoX;
+  const y = (dh <= H) ? (H - dh)/2 : photoY;
+  ctx.drawImage(PHOTO, x, y, dw, dh);
+}
+
 function render(canvas, text){
   const ctx = canvas.getContext("2d");
   canvas.width = W; canvas.height = H;
 
-  // Fundo: cor (modo paletas) ou foto em "cover" (modo foto).
+  // Fundo: cor (modo paletas) ou foto ajustável (modo foto).
   if(mode === "foto" && PHOTO){
-    const r = Math.max(W/PHOTO.width, H/PHOTO.height);
-    const dw = PHOTO.width*r, dh = PHOTO.height*r;
-    ctx.drawImage(PHOTO, (W-dw)/2, (H-dh)/2, dw, dh);
+    drawPhotoBg(ctx);
   } else {
     ctx.fillStyle = mode === "foto" ? "#cfc6b8" : current.bg;
     ctx.fillRect(0, 0, W, H);
@@ -308,6 +329,7 @@ function draw(){ render(canvas, $("text").value); $("count").textContent = $("te
     btn.classList.add("on");
     $("ctlPaletas").style.display = mode === "paletas" ? "block" : "none";
     $("ctlFoto").style.display = mode === "foto" ? "block" : "none";
+    canvas.classList.toggle("grab", mode === "foto" && !!PHOTO);
     draw();
   });
 });
@@ -334,11 +356,41 @@ $("photo").addEventListener("change", (e)=>{
   const reader = new FileReader();
   reader.onload = ()=>{
     const img = new Image();
-    img.onload = ()=>{ PHOTO = img; draw(); };
+    img.onload = ()=>{
+      PHOTO = img;
+      photoZoom = 1; photoX = 0; photoY = 0;   // reseta ajuste ao trocar de foto
+      $("zoom").value = 100;
+      $("photoAdjust").style.display = "block";
+      canvas.classList.add("grab");
+      draw();
+    };
     img.src = reader.result;
   };
   reader.readAsDataURL(file);
 });
+
+// Zoom da foto.
+$("zoom").addEventListener("input", (e)=>{ photoZoom = (+e.target.value)/100; draw(); });
+
+// Reposicionar arrastando a foto na prévia (mouse e toque).
+let dragging = false, lastX = 0, lastY = 0;
+function canvasScale(){ const r = canvas.getBoundingClientRect(); return r.width ? (W / r.width) : 1; }
+canvas.addEventListener("pointerdown", (e)=>{
+  if(mode !== "foto" || !PHOTO) return;
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  try { canvas.setPointerCapture(e.pointerId); } catch(_){}
+});
+canvas.addEventListener("pointermove", (e)=>{
+  if(!dragging) return;
+  const s = canvasScale();
+  photoX += (e.clientX - lastX) * s;
+  photoY += (e.clientY - lastY) * s;
+  lastX = e.clientX; lastY = e.clientY;
+  draw();
+});
+function endDrag(){ dragging = false; }
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
 
 // Atalhos de cor da fonte — os mesmos tons das paletas.
 const FONT_PRESETS = [
