@@ -115,7 +115,11 @@
               <span class="note muted">ou uma cor personalizada</span>
             </div>
           </div>
-          <p class="note muted" style="margin-top:12px">Cor única para o texto e o @. Uma <strong>sombra automática</strong> atrás do texto mantém tudo legível em qualquer foto. Topo fixo com <strong>@dra.isabelciribelli</strong>. Sem assinatura neste modo.</p>
+          <div style="margin-top:16px">
+            <span class="eyebrow muted" style="display:block;margin-bottom:8px">Intensidade da sombra</span>
+            <input type="range" id="shadow" min="0" max="100" value="60" style="width:100%" />
+          </div>
+          <p class="note muted" style="margin-top:12px">Texto <strong>centralizado</strong> e em <strong>negrito</strong>. A sombra (ajustável acima) mantém tudo legível sobre qualquer foto. Cor única para o texto e o @. Topo fixo com <strong>@dra.isabelciribelli</strong>. Sem assinatura neste modo.</p>
         </div>
       </section>
     </div>
@@ -163,9 +167,12 @@ const SIG_W = 150, SIG_RIGHT = 95, SIG_BOTTOM = 60;
 const HANDLE = "@dra.isabelciribelli";
 const HANDLE_TOP = 96, HANDLE_SIZE = 34;
 
+const FOTO_WRAP = 800;                  // largura de quebra no modo foto (texto centralizado)
+
 let mode = "paletas";
 let current = { bg: PRESETS[0].bg, fg: PRESETS[0].fg };
 let fontColor = "#a8553f";
+let shadowStrength = 60;                 // 0–100, ajustável no modo foto
 let PHOTO = null;
 let SIG = null;
 
@@ -203,12 +210,16 @@ function luminance(hex){
   return 0.2126*f(r) + 0.7152*f(g) + 0.0722*f(b);
 }
 // Sombra adaptativa: escura se a fonte for clara, clara se a fonte for escura.
-// Garante legibilidade do texto sobre qualquer foto de fundo.
-function setTextShadow(ctx, fg){
+// A intensidade (0–100) controla opacidade e desfoque; várias passadas
+// somam o halo, garantindo legibilidade sobre qualquer foto de fundo.
+function setTextShadow(ctx, fg, strength){
   const light = luminance(fg) > 0.5;
-  ctx.shadowColor = light ? "rgba(0,0,0,0.62)" : "rgba(255,255,255,0.72)";
-  ctx.shadowBlur = 24; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+  const a = Math.min(0.92, 0.32 + strength/100 * 0.58);
+  ctx.shadowColor = light ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`;
+  ctx.shadowBlur = Math.round(9 + strength/100 * 25);
+  ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
 }
+function shadowPasses(strength){ return strength > 0 ? 2 + Math.round(strength/100 * 4) : 1; }
 function clearShadow(ctx){ ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; }
 
 function drawSig(ctx, color){
@@ -224,12 +235,12 @@ function drawSig(ctx, color){
 }
 
 function drawHandle(ctx, color){
-  ctx.font = `600 ${HANDLE_SIZE}px ${BODY}`;
+  ctx.font = `700 ${HANDLE_SIZE}px ${BODY}`;
   ctx.fillStyle = color;
   ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-  setTextShadow(ctx, color);
-  ctx.fillText(HANDLE, W/2, HANDLE_TOP);
-  ctx.fillText(HANDLE, W/2, HANDLE_TOP);
+  const passes = shadowPasses(shadowStrength);
+  if(shadowStrength > 0) setTextShadow(ctx, color, shadowStrength);
+  for(let i=0; i<passes; i++) ctx.fillText(HANDLE, W/2, HANDLE_TOP);
   clearShadow(ctx);
   ctx.textAlign = "left";
 }
@@ -248,34 +259,41 @@ function render(canvas, text){
     ctx.fillRect(0, 0, W, H);
   }
 
-  const fg = mode === "foto" ? fontColor : current.fg;
+  // Modo foto: texto CENTRALIZADO e em NEGRITO (como no exemplo).
+  // Modo paletas: texto "blocado" à esquerda, peso normal.
+  const foto = mode === "foto";
+  const fg = foto ? fontColor : current.fg;
+  const weight = foto ? 700 : 400;
+  const wrapW = foto ? FOTO_WRAP : TEXT_WIDTH;
+  const alignX = foto ? W/2 : TEXT_LEFT;
   const regTop = REGION_TOP;
-  const regBot = mode === "paletas" ? REGION_BOT_SIG : REGION_BOT_PHOTO;
+  const regBot = foto ? REGION_BOT_PHOTO : REGION_BOT_SIG;
   const regionH = regBot - regTop;
 
   // Auto-ajuste: reduz a fonte até o texto caber na altura disponível.
   let size = BASE, lh = Math.round(BASE*LH_RATIO), lines = [];
   for(let s=BASE; s>=MIN; s-=2){
-    ctx.font = `400 ${s}px ${BODY}`;
-    lines = text.trim() ? wrapText(ctx, text, TEXT_WIDTH) : [];
+    ctx.font = `${weight} ${s}px ${BODY}`;
+    lines = text.trim() ? wrapText(ctx, text, wrapW) : [];
     size = s; lh = Math.round(s*LH_RATIO);
     if(lines.length*lh <= regionH) break;
   }
 
   const textH = lines.length*lh;
   const startY = Math.round(regTop + (regionH - textH)/2);
-  ctx.font = `400 ${size}px ${BODY}`;
+  ctx.font = `${weight} ${size}px ${BODY}`;
   ctx.fillStyle = fg;
-  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  const passes = mode === "foto" ? 2 : 1;   // no modo foto, 2 passadas reforçam a sombra
-  if(mode === "foto") setTextShadow(ctx, fg);
+  ctx.textAlign = foto ? "center" : "left"; ctx.textBaseline = "alphabetic";
+  const passes = foto ? shadowPasses(shadowStrength) : 1;
+  if(foto && shadowStrength > 0) setTextShadow(ctx, fg, shadowStrength);
   for(let pass=0; pass<passes; pass++){
-    lines.forEach((ln,i)=>{ if(ln) ctx.fillText(ln, TEXT_LEFT, startY + i*lh + size*0.75); });
+    lines.forEach((ln,i)=>{ if(ln) ctx.fillText(ln, alignX, startY + i*lh + size*0.75); });
   }
   clearShadow(ctx);
+  ctx.textAlign = "left";
 
-  if(mode === "paletas") drawSig(ctx, fg);
-  else drawHandle(ctx, fg);
+  if(foto) drawHandle(ctx, fg);
+  else drawSig(ctx, fg);
 }
 
 const $ = (id)=>document.getElementById(id);
@@ -346,6 +364,7 @@ $("fontcolor").addEventListener("input", (e)=>{
   [...fontSwWrap.children].forEach(x=>x.classList.remove("on"));
   draw();
 });
+$("shadow").addEventListener("input", (e)=>{ shadowStrength = +e.target.value; draw(); });
 
 $("text").addEventListener("input", draw);
 
@@ -370,7 +389,9 @@ const sigImg = new Image();
 sigImg.onload = ()=>{ SIG = sigImg; draw(); };
 sigImg.onerror = ()=> draw();
 sigImg.src = SIG_URI;
-(document.fonts && document.fonts.load ? document.fonts.load(`400 ${BASE}px "Lora"`) : Promise.resolve()).then(draw).catch(draw);
+(document.fonts && document.fonts.load
+  ? Promise.all([document.fonts.load(`400 ${BASE}px "Lora"`), document.fonts.load(`700 ${BASE}px "Lora"`)])
+  : Promise.resolve()).then(draw).catch(draw);
 draw();
 </script>
 </body>
